@@ -27,14 +27,21 @@ schema.set("toJSON", {
     ret.date = fmtDate(ret.createdAt);
     if (ret.type === "Poll") {
       const voters = ret.voters || [];
-      ret.pollOptions = (ret.pollOptions || []).map((o, i) => ({
-        text: o.text,
-        votes: voters.filter((v) => v.optionIndex === i).length,
-      }));
+      const totalVotes = voters.length;
+      ret.totalVotes = totalVotes;
+      ret.pollOptions = (ret.pollOptions || []).map((o, i) => {
+        const count = voters.filter((v) => v.optionIndex === i).length;
+        return {
+          text: o.text,
+          votes: count,
+          percentage: totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0,
+        };
+      });
+      ret.voters = voters.map((v) => ({ voter: v.voter, optionIndex: v.optionIndex }));
     } else {
       delete ret.pollOptions;
+      delete ret.voters;
     }
-    delete ret.voters;
     return ret;
   },
 });
