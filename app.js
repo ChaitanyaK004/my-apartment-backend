@@ -69,6 +69,19 @@ app.use(
 app.use(express.json({ limit: "1mb" })); // staff photos are sent as small data URLs
 app.use(requestLogger);
 
+// Convenience alias: automatically prefix /api if omitted by client (e.g. /auth/login -> /api/auth/login)
+app.use((req, res, next) => {
+  if (
+    !req.url.startsWith("/api") &&
+    !req.url.startsWith("/download") &&
+    req.url !== "/" &&
+    req.url !== "/favicon.ico"
+  ) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
 app.get("/", (req, res) => res.json({ app: "My Apartment API", docs: "See backend/README.md", health: "/api/health" }));
 app.get("/api/health", (req, res) => {
   const states = ["disconnected", "connected", "connecting", "disconnecting"];
