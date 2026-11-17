@@ -10,7 +10,11 @@ const schema = new mongoose.Schema(
     date: { type: String, required: true, trim: true },
     slot: { type: String, required: true, trim: true },
     fee: { type: String, default: "Free for residents" },
-    status: { type: String, enum: ["Confirmed", "Cancelled"], default: "Confirmed" },
+    status: { type: String, enum: ["Pending", "Confirmed", "Cancelled", "Rejected"], default: "Pending" },
+    fromTime: { type: String, trim: true },
+    toTime: { type: String, trim: true },
+    approvedBy: { type: String, trim: true },
+    rejectionReason: { type: String, trim: true },
   },
   { timestamps: true, id: false }
 );

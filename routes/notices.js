@@ -19,8 +19,10 @@ router.get("/", asyncHandler(async (req, res) => {
 
 router.post("/", asyncHandler(async (req, res) => {
   const data = pick(req.body, ["type", "title", "body", "category", "audience", "pinned", "createdBy"]);
-  // Only the admin publishes official notices and polls; anyone can post a suggestion.
-  if (!isAdmin(req.user) && data.type !== "Suggestion") throw httpError(403, "Only the admin can publish notices and polls. You can post a Suggestion.");
+  // Admin publishes notices and polls; residents can post suggestions or schedule meetings.
+  if (!isAdmin(req.user) && data.type !== "Suggestion" && data.type !== "Meeting") {
+    throw httpError(403, "Only the admin can publish notices and polls. You can post a Suggestion or Meeting.");
+  }
   if (!isAdmin(req.user)) data.pinned = false;
   data.createdBy = req.user.name;
   if (data.type === "Poll") {

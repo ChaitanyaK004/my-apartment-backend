@@ -4,7 +4,7 @@ import { fmtDate } from "../utils/format.js";
 const schema = new mongoose.Schema(
   {
     id: { type: String, unique: true },
-    type: { type: String, enum: ["Notice", "Suggestion", "Poll"], default: "Notice" },
+    type: { type: String, enum: ["Notice", "Suggestion", "Poll", "Meeting"], default: "Notice" },
     title: { type: String, required: [true, "Title is required"], trim: true },
     body: { type: String, required: [true, "Message is required"], trim: true },
     category: { type: String, enum: ["Community", "Maintenance", "Security", "Facilities", "Payments"], default: "Community" },
