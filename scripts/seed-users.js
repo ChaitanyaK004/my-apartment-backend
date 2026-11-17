@@ -15,9 +15,7 @@ const accounts = [
     role: "Admin",
   },
   { username: "arjun", email: "arjun@myapartment.com", password: "Resident@123", name: "Arjun Mehta", role: "Resident", flat: "A-1203" },
-  { username: "priya", email: "priya@myapartment.com", password: "Resident@123", name: "Priya Patel", role: "Resident", flat: "C-502" },
   { username: "guard", email: "guard@myapartment.com", password: "Guard@123", name: "Ramesh Kumar", role: "Security Guard" },
-  // Linked to maintenance staff profile MNT-001 (see seed.js)
   { username: "ravi", email: "ravi@myapartment.com", password: "Maint@123", name: "Ravi Shinde", role: "Maintenance Staff" },
 ];
 
