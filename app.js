@@ -118,6 +118,10 @@ app.use("/api/visitors", requireAuth, visitors);
 app.use("/api/notices", requireAuth, notices);
 app.use("/api/parking", requireAuth, parking);
 app.use("/api/security", requireAuth, security);
+app.use("/api/incidents", requireAuth, (req, res, next) => {
+  req.url = req.url === "/" ? "/incidents" : `/incidents${req.url}`;
+  return security(req, res, next);
+});
 app.use("/api/maintenance", requireAuth, maintenance);
 app.use("/api/notifications", requireAuth, notifications);
 app.use("/api/payments", requireAuth, payments);
