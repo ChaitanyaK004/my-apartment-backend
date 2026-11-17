@@ -24,6 +24,9 @@ router.post("/bookings", asyncHandler(async (req, res) => {
     if (!req.user.flat) throw httpError(400, "Your account has no flat number assigned");
     data.residentName = req.user.name;
     data.flat = req.user.flat;
+  } else {
+    data.residentName = data.residentName || req.user.name;
+    data.flat = data.flat || "Management Office";
   }
   if (!data.facilityId || !data.facilityName || !data.date || !data.slot) {
     throw httpError(400, "Facility, date, and time slot are required");

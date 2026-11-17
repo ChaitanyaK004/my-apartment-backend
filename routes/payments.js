@@ -44,8 +44,13 @@ router.get("/", requireRole(ADMIN, RESIDENT), asyncHandler(async (req, res) => {
   res.json(await Payment.find(filter).sort({ createdAt: -1 }));
 }));
 
-router.post("/", requireRole(ADMIN), asyncHandler(async (req, res) => {
+router.post("/", requireRole(ADMIN, RESIDENT), asyncHandler(async (req, res) => {
   const data = pick(req.body, ["resident", "flat", "month", "amount", "date", "method", "status", "residenceName"]);
+  if (isResident(req.user)) {
+    if (!req.user.flat) throw httpError(400, "Your account has no flat assigned");
+    data.flat = req.user.flat;
+    data.resident = req.user.name;
+  }
   const doc = await createWithId(Payment, data, "payment", "PAY-", 4);
   logSaved("payments", doc);
   await notifyFlat(doc.flat, {
@@ -62,7 +67,10 @@ router.post("/", requireRole(ADMIN), asyncHandler(async (req, res) => {
 router.post("/:id/pay", asyncHandler(async (req, res) => {
   const doc = await Payment.findOne({ id: req.params.id });
   if (!doc) throw httpError(404, "Payment record not found");
-  if (isResident(req.user) && doc.flat !== req.user.flat) {
+  if (
+    isResident(req.user) &&
+    String(doc.flat || "").trim().toUpperCase() !== String(req.user.flat || "").trim().toUpperCase()
+  ) {
     throw httpError(403, "You can only pay dues for your own flat");
   }
   if (doc.status === "Paid") throw httpError(409, "This bill is already paid");
