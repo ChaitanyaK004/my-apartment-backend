@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export const NOTIFICATION_TYPES = ["Maintenance", "Security", "Visitor", "Announcement", "Complaint", "System"];
+export const NOTIFICATION_TYPES = ["Maintenance", "Security", "Visitor", "Announcement", "Complaint", "System", "Emergency"];
 
 // One document per recipient, so read/unread is tracked per person.
 const schema = new mongoose.Schema(
@@ -14,6 +14,8 @@ const schema = new mongoose.Schema(
     read: { type: Boolean, default: false },
     readAt: Date,
     createdBy: { type: String, trim: true },
+    isEmergency: { type: Boolean, default: false },
+    location: { type: String, trim: true },
   },
   { timestamps: true }
 );

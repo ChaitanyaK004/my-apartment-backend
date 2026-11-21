@@ -9,7 +9,7 @@ import { requireRole, ADMIN, GUARD, RESIDENT, isResident } from "../middleware/a
 import { logSaved } from "../utils/log.js";
 import { pick, str } from "../utils/format.js";
 import { createLogin, wantsLogin } from "../utils/accounts.js";
-import { notifyRoles, notifyUsers, notifyResident } from "../utils/notify.js";
+import { bus, notifyRoles, notifyUsers, notifyResident, notifyAllUsers } from "../utils/notify.js";
 
 const router = Router();
 const STAFF_FIELDS = ["name", "photo", "phone", "post", "shift", "shiftStart", "shiftEnd", "dutyStatus"];
@@ -94,20 +94,48 @@ router.post("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(asyn
   const doc = await createWithId(Incident, data, "incident", "INC-", 3);
   logSaved("incidents", doc);
 
-  // Admin + all guards hear about it (except the person who reported it)
-  const staff = await User.find({ role: { $in: [ADMIN, GUARD] }, _id: { $ne: req.user._id } }, { _id: 1 });
-  await notifyUsers(staff, {
-    type: "Security",
-    title: `${doc.severity === "High" ? "🚨 " : ""}Incident reported: ${doc.title}`,
-    message: `${doc.type} at ${doc.location}. Reported by ${doc.reportedBy}${doc.flat ? ` (${doc.flat})` : ""}.`,
-    link: "/security", refId: doc.id, createdBy: req.user.name,
-  });
-  if (isResident(req.user)) {
-    await notifyUsers([req.user], {
-      type: "Security", title: "Incident report received",
-      message: `Your report "${doc.title}" (${doc.id}) was sent to the security team.`,
-      link: "/security", refId: doc.id, createdBy: "Security Desk",
+  if (doc.type === "Emergency") {
+    // Society-wide emergency broadcast to EVERY user in the society
+    const allUsers = await User.find({}, { _id: 1, role: 1, name: 1, flat: 1 });
+    await notifyUsers(allUsers, {
+      type: "Emergency",
+      isEmergency: true,
+      location: doc.location,
+      title: `🚨 EMERGENCY ALERT: ${doc.title.toUpperCase()}`,
+      message: `${doc.description || "Emergency alert reported"} Location: ${doc.location}. Respond immediately.`,
+      link: "/security",
+      refId: doc.id,
+      createdBy: req.user.name,
     });
+    bus.emit("emergency:broadcast", {
+      id: doc.id,
+      incidentId: doc.id,
+      emergencyType: doc.title,
+      title: `🚨 EMERGENCY ALERT: ${doc.title.toUpperCase()}`,
+      message: `${doc.description || "Emergency alert reported"} Location: ${doc.location}.`,
+      location: doc.location,
+      reportedBy: req.user.name,
+      flat: doc.flat,
+      severity: "High",
+      isEmergency: true,
+      timestamp: new Date().toISOString(),
+    });
+  } else {
+    // Admin + all guards hear about it (except the person who reported it)
+    const staff = await User.find({ role: { $in: [ADMIN, GUARD] }, _id: { $ne: req.user._id } }, { _id: 1 });
+    await notifyUsers(staff, {
+      type: "Security",
+      title: `${doc.severity === "High" ? "🚨 " : ""}Incident reported: ${doc.title}`,
+      message: `${doc.type} at ${doc.location}. Reported by ${doc.reportedBy}${doc.flat ? ` (${doc.flat})` : ""}.`,
+      link: "/security", refId: doc.id, createdBy: req.user.name,
+    });
+    if (isResident(req.user)) {
+      await notifyUsers([req.user], {
+        type: "Security", title: "Incident report received",
+        message: `Your report "${doc.title}" (${doc.id}) was sent to the security team.`,
+        link: "/security", refId: doc.id, createdBy: "Security Desk",
+      });
+    }
   }
   res.status(201).json(doc);
 }));
@@ -139,22 +167,95 @@ router.delete("/incidents/:id", requireRole(ADMIN), asyncHandler(async (req, res
 
 /* -------------------------- Emergency + summary ------------------------- */
 
-// The red "Emergency alert" button: logs a High incident and alerts Admin + every guard instantly.
-router.post("/emergency", asyncHandler(async (req, res) => {
-  const location = String(req.body.location || "").trim() || (req.user.flat ? `Flat ${req.user.flat}` : "Not specified");
+// The SOS / Emergency alert: logs a High incident and instantly alerts EVERY user in the society + triggers emergency siren broadcast
+// Restricted: ONLY ADMINS have permission to broadcast emergency SOS
+router.post("/emergency", requireRole(ADMIN), asyncHandler(async (req, res) => {
+  const location = String(req.body.location || "").trim() || (req.user.flat ? `Flat ${req.user.flat}` : "Society Premises");
+  const emergencyType = String(req.body.emergencyType || "Emergency Alert").trim();
+  const description = String(req.body.message || "").trim() || `Emergency alert raised by ${req.user.name}${req.user.flat ? ` (Flat ${req.user.flat})` : ""}.`;
+
   const doc = await createWithId(Incident, {
-    title: "Emergency alert", type: "Emergency", severity: "High", location,
-    description: String(req.body.message || "").trim() || `Emergency alert raised by ${req.user.name}.`,
-    reportedBy: req.user.name, reporterUsername: req.user.username, reporterRole: req.user.role,
+    title: emergencyType,
+    type: "Emergency",
+    severity: "High",
+    location,
+    description,
+    reportedBy: req.user.name,
+    reporterUsername: req.user.username,
+    reporterRole: req.user.role,
     flat: req.user.flat,
+    status: "Open",
   }, "incident", "INC-", 3);
   logSaved("incidents (emergency)", doc);
-  await notifyRoles([ADMIN, GUARD], {
-    type: "Security", title: "🚨 EMERGENCY ALERT",
-    message: `${req.user.name} raised an emergency alert at ${location}. Respond immediately.`,
-    link: "/security", refId: doc.id, createdBy: req.user.name,
+
+  // 1. Notify EVERY SINGLE USER in the entire society (Admins, Guards, Residents, Maintenance)
+  const allUsers = await User.find({}, { _id: 1, role: 1, name: 1, flat: 1 });
+  await notifyUsers(allUsers, {
+    type: "Emergency",
+    isEmergency: true,
+    location,
+    title: `🚨 EMERGENCY ALERT: ${emergencyType.toUpperCase()}`,
+    message: `${description} Location: ${location}. Respond immediately.`,
+    link: "/security",
+    refId: doc.id,
+    createdBy: req.user.name,
   });
-  res.status(201).json(doc);
+
+  // 2. Broadcast on the event bus so SSE stream pushes it to all connected users in real time
+  bus.emit("emergency:broadcast", {
+    id: doc.id,
+    incidentId: doc.id,
+    emergencyType,
+    title: `🚨 EMERGENCY ALERT: ${emergencyType.toUpperCase()}`,
+    message: `${description} Location: ${location}.`,
+    location,
+    reportedBy: req.user.name,
+    flat: req.user.flat,
+    severity: "High",
+    isEmergency: true,
+    timestamp: new Date().toISOString(),
+  });
+
+  res.status(201).json({ ...doc.toJSON(), broadcastedTo: allUsers.length });
+}));
+
+// Check if there is an active emergency (unresolved within last 2 hours)
+router.get("/emergency/active", asyncHandler(async (req, res) => {
+  const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const active = await Incident.findOne({
+    type: "Emergency",
+    severity: "High",
+    status: { $ne: "Resolved" },
+    createdAt: { $gte: cutoff },
+  }).sort({ createdAt: -1 });
+
+  res.json({ active: active || null });
+}));
+
+// Resolve an active emergency
+router.patch("/emergency/:id/resolve", requireRole(ADMIN, GUARD), asyncHandler(async (req, res) => {
+  const doc = await Incident.findOne({ id: req.params.id });
+  if (!doc) throw httpError(404, "Emergency incident not found");
+  doc.status = "Resolved";
+  doc.resolvedAt = new Date();
+  doc.actionTaken = String(req.body.actionTaken || "Emergency cleared and resolved by security response team.").trim();
+  await doc.save();
+  logSaved("incidents (emergency resolved)", doc);
+
+  // Notify everyone of all-clear
+  const allUsers = await User.find({}, { _id: 1 });
+  await notifyUsers(allUsers, {
+    type: "Security",
+    title: "✅ EMERGENCY RESOLVED: ALL CLEAR",
+    message: `The emergency at ${doc.location} has been addressed and cleared by ${req.user.name}. Normal operations resumed.`,
+    link: "/security",
+    refId: doc.id,
+    createdBy: req.user.name,
+  });
+
+  bus.emit("emergency:resolved", { id: doc.id });
+
+  res.json(doc);
 }));
 
 router.get("/summary", asyncHandler(async (req, res) => {

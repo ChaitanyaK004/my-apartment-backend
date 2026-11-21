@@ -36,6 +36,18 @@ router.post("/", asyncHandler(async (req, res) => {
     "complaint", "C", 3
   );
   logSaved("complaints", doc);
+
+  // Instantly alert all Admins so resident requests arrive immediately
+  const admins = await User.find({ role: ADMIN, _id: { $ne: req.user._id } }, { _id: 1 });
+  await notifyUsers(admins, {
+    type: "Complaint",
+    title: `New ${doc.priority || "Normal"} Complaint: ${doc.title}`,
+    message: `${doc.resident} (Flat ${doc.flat}) reported: ${doc.title} (${doc.category}).`,
+    link: "/complaints",
+    refId: doc.id,
+    createdBy: req.user.name,
+  });
+
   res.status(201).json(doc);
 }));
 

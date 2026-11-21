@@ -63,10 +63,10 @@ router.post("/", asyncHandler(async (req, res) => {
   logSaved("visitors", doc);
 
   if (isResident(req.user)) {
-    await notifyRoles([GUARD], {
+    await notifyRoles([ADMIN, GUARD], {
       type: "Visitor", title: "Guest pre-approved",
       message: `${doc.resident} (${doc.flat}) pre-approved ${doc.name} – ${doc.purpose}, ${fmtDateTime(doc.visitTime)}.`,
-      link: "/security", refId: doc.id, createdBy: req.user.name,
+      link: "/visitors", refId: doc.id, createdBy: req.user.name,
     });
   } else {
     const waiting = doc.status === "Pending";
@@ -113,10 +113,10 @@ router.patch("/:id", asyncHandler(async (req, res) => {
 
   if (status && status !== before) {
     if (isResident(req.user)) {
-      await notifyRoles([GUARD], {
+      await notifyRoles([ADMIN, GUARD], {
         type: "Visitor", title: `Visitor ${status.toLowerCase()} by resident`,
         message: `${req.user.name} (${doc.flat}) ${status.toLowerCase()} ${doc.name}.`,
-        link: "/security", refId: doc.id, createdBy: req.user.name,
+        link: "/visitors", refId: doc.id, createdBy: req.user.name,
       });
     } else {
       const words = { Approved: "was approved at the gate", Rejected: "was denied entry", "Checked In": "has checked in", "Checked Out": "has checked out" };

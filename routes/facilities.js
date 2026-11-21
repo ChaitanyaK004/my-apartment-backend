@@ -5,9 +5,43 @@ import { asyncHandler, httpError } from "../middleware/errors.js";
 import { logSaved } from "../utils/log.js";
 import { pick, str } from "../utils/format.js";
 import { requireRole, ADMIN, isResident } from "../middleware/auth.js";
-import { notifyFlat } from "../utils/notify.js";
+import User from "../models/User.js";
+import { notifyFlat, notifyUsers } from "../utils/notify.js";
 
 const router = Router();
+
+function timeToMinutes(tStr) {
+  if (!tStr) return null;
+  const match = tStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return null;
+  let [_, hours, mins, modifier] = match;
+  hours = parseInt(hours, 10);
+  mins = parseInt(mins, 10);
+  if (modifier) {
+    if (modifier.toUpperCase() === "PM" && hours < 12) hours += 12;
+    if (modifier.toUpperCase() === "AM" && hours === 12) hours = 0;
+  }
+  return hours * 60 + mins;
+}
+
+function parseSlotRange(slotStr) {
+  if (!slotStr) return null;
+  const parts = slotStr.split(/–|-|to/i).map((s) => s.trim());
+  if (parts.length >= 2) {
+    const start = timeToMinutes(parts[0]);
+    const end = timeToMinutes(parts[1]);
+    if (start !== null && end !== null) return { start, end };
+  }
+  return null;
+}
+
+function checkSlotOverlap(slotA, slotB) {
+  if (slotA.trim().toLowerCase() === slotB.trim().toLowerCase()) return true;
+  const rangeA = parseSlotRange(slotA);
+  const rangeB = parseSlotRange(slotB);
+  if (!rangeA || !rangeB) return slotA === slotB;
+  return rangeA.start < rangeB.end && rangeB.start < rangeA.end;
+}
 
 router.get("/bookings", asyncHandler(async (req, res) => {
   const filter = {};
@@ -38,15 +72,15 @@ router.post("/bookings", asyncHandler(async (req, res) => {
     throw httpError(400, "Facility, date, and time slot are required");
   }
 
-  // Prevent double booking of active slot
-  const clash = await FacilityBooking.findOne({
+  // Prevent double booking of active slot with overlap checking
+  const existingActive = await FacilityBooking.find({
     facilityId: data.facilityId,
     date: data.date,
-    slot: data.slot,
     status: { $in: ["Confirmed", "Pending"] },
   });
+  const clash = existingActive.find((b) => checkSlotOverlap(b.slot, data.slot));
   if (clash) {
-    throw httpError(409, `Slot "${data.slot}" on ${data.date} is already ${clash.status.toLowerCase()} for ${clash.facilityName}`);
+    throw httpError(409, `Time slot "${data.slot}" on ${data.date} overlaps with existing ${clash.status.toLowerCase()} booking (${clash.slot}) for ${clash.facilityName}`);
   }
 
   const doc = await createWithId(FacilityBooking, data, "facility_booking", "BK-", 3);
@@ -58,6 +92,17 @@ router.post("/bookings", asyncHandler(async (req, res) => {
       type: "System",
       title: `Facility booking submitted: ${doc.facilityName}`,
       message: `Your booking for ${doc.facilityName} on ${doc.date} (${doc.slot}) has been submitted and is awaiting Admin approval.`,
+      link: "/facilities",
+      refId: doc.id,
+      createdBy: req.user.name,
+    });
+
+    // Instantly notify Admin for approval
+    const admins = await User.find({ role: ADMIN, _id: { $ne: req.user._id } }, { _id: 1 });
+    await notifyUsers(admins, {
+      type: "System",
+      title: `🏛️ Booking Request: ${doc.facilityName}`,
+      message: `${doc.residentName} (Flat ${doc.flat}) requested ${doc.facilityName} on ${doc.date} (${doc.slot}). Awaiting approval.`,
       link: "/facilities",
       refId: doc.id,
       createdBy: req.user.name,

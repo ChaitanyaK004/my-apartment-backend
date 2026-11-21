@@ -5,6 +5,8 @@ import { asyncHandler, httpError } from "../middleware/errors.js";
 import { logSaved } from "../utils/log.js";
 import { pick, str } from "../utils/format.js";
 import { requireRole, ADMIN, isResident } from "../middleware/auth.js";
+import User from "../models/User.js";
+import { notifyUsers } from "../utils/notify.js";
 
 const router = Router();
 
@@ -38,6 +40,20 @@ router.post("/", asyncHandler(async (req, res) => {
 
   const doc = await createWithId(ParkingReservation, data, "parking", "PRK-", 3);
   logSaved("parking", doc);
+
+  // Instantly alert Admins so parking requests appear immediately
+  if (isResident(req.user)) {
+    const admins = await User.find({ role: ADMIN, _id: { $ne: req.user._id } }, { _id: 1 });
+    await notifyUsers(admins, {
+      type: "System",
+      title: `🚗 Parking slot booked: Slot ${doc.slot}`,
+      message: `${doc.residentName} (Flat ${doc.flat}) booked slot ${doc.slot} for ${doc.vehicleNumber || "vehicle"}.`,
+      link: "/parking",
+      refId: doc.id,
+      createdBy: req.user.name,
+    });
+  }
+
   res.status(201).json(doc);
 }));
 
