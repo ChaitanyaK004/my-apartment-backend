@@ -25,10 +25,15 @@ const schema = new mongoose.Schema(
     description: { type: String, required: [true, "Please describe the problem"], trim: true },
     priority: { type: String, enum: ["Low", "Medium", "High"], default: "Medium" },
     status: { type: String, enum: ["Pending", "In Progress", "Resolved"], default: "Pending" },
+    resolvedAt: { type: Date },
     comments: [{ author: String, role: String, text: String, date: { type: Date, default: Date.now }, _id: false }],
   },
   { timestamps: true, id: false }
 );
+
+// TTL index: Automatically remove resolved complaints 7 days after resolution (604,800 seconds).
+// Unsolved complaints (where resolvedAt is null/undefined) NEVER expire and remain permanent.
+schema.index({ resolvedAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
 
 schema.set("toJSON", {
   transform(doc, ret) {

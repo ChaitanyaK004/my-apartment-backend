@@ -14,6 +14,16 @@ const router = Router();
 router.get("/categories", (req, res) => res.json(DEFAULT_CATEGORIES));
 
 router.get("/", asyncHandler(async (req, res) => {
+  // Auto-cleanup any resolved complaint older than 7 days (unsolved complaints are never touched)
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  await Complaint.deleteMany({
+    status: "Resolved",
+    $or: [
+      { resolvedAt: { $lt: sevenDaysAgo } },
+      { resolvedAt: { $exists: false }, updatedAt: { $lt: sevenDaysAgo } },
+    ],
+  });
+
   const filter = {};
   for (const k of ["status", "category", "flat", "priority"]) if (req.query[k]) filter[k] = str(req.query[k]);
   // Residents only see their own flat's complaints
@@ -54,8 +64,18 @@ router.post("/", asyncHandler(async (req, res) => {
 router.patch("/:id", requireRole(ADMIN, GUARD, MAINTENANCE), asyncHandler(async (req, res) => {
   const update = pick(req.body, ["status", "priority", "description"]);
   const before = await Complaint.findOne({ id: req.params.id }, { status: 1 });
-  const doc = await Complaint.findOneAndUpdate({ id: req.params.id }, { $set: update }, { new: true, runValidators: true });
-  if (!doc) throw httpError(404, "Complaint not found");
+  if (!before) throw httpError(404, "Complaint not found");
+
+  const updateDoc = { $set: update };
+  if (update.status === "Resolved") {
+    // When complaint is solved, stamp resolvedAt to start the 7-day retention countdown
+    updateDoc.$set.resolvedAt = new Date();
+  } else if (update.status && update.status !== "Resolved") {
+    // When complaint is unsolved (In Progress / Pending), remove resolvedAt so it remains permanent
+    updateDoc.$unset = { resolvedAt: 1 };
+  }
+
+  const doc = await Complaint.findOneAndUpdate({ id: req.params.id }, updateDoc, { new: true, runValidators: true });
   logSaved("complaints (updated)", doc);
   if (update.status && before?.status !== doc.status) {
     await notifyFlat(doc.flat, {
