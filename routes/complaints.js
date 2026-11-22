@@ -118,10 +118,33 @@ router.post("/:id/comments", asyncHandler(async (req, res) => {
   res.status(201).json(doc);
 }));
 
-router.delete("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Complaint.findOneAndDelete({ id: req.params.id });
+router.delete("/:id", asyncHandler(async (req, res) => {
+  const doc = await Complaint.findOne({ id: req.params.id });
   if (!doc) throw httpError(404, "Complaint not found");
-  res.json({ deleted: req.params.id });
+
+  // Admins can delete any complaint
+  if (req.user?.role === ADMIN) {
+    await Complaint.deleteOne({ _id: doc._id });
+    logSaved("complaints (deleted by admin)", { id: req.params.id, deletedBy: req.user.name });
+    return res.json({ deleted: req.params.id });
+  }
+
+  // Residents can delete their own flat's complaint if it is still Pending (e.g. submitted by mistake)
+  if (isResident(req.user)) {
+    const flatMatches =
+      String(doc.flat || "").trim().toLowerCase() === String(req.user.flat || "").trim().toLowerCase();
+    if (!flatMatches) {
+      throw httpError(403, "You can only delete complaints filed for your own flat");
+    }
+    if (doc.status !== "Pending") {
+      throw httpError(400, "You can only delete a complaint while it is Pending. Once In Progress or Resolved, complaints cannot be deleted.");
+    }
+    await Complaint.deleteOne({ _id: doc._id });
+    logSaved("complaints (deleted by resident)", { id: req.params.id, deletedBy: req.user.name, flat: req.user.flat });
+    return res.json({ deleted: req.params.id });
+  }
+
+  throw httpError(403, "You do not have permission to delete complaints");
 }));
 
 export default router;
