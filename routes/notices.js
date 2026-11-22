@@ -88,10 +88,28 @@ router.post("/:id/vote", asyncHandler(async (req, res) => {
   res.json(doc);
 }));
 
-router.delete("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Notice.findOneAndDelete({ id: req.params.id });
+router.delete("/:id", asyncHandler(async (req, res) => {
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await Notice.findOne(query);
   if (!doc) throw httpError(404, "Notice not found");
-  res.json({ deleted: req.params.id });
+
+  const role = String(req.user?.role || "").toLowerCase();
+  const isSocietyAdmin = role === "admin" || role === "secretary";
+  const isCreator = doc.createdBy && (doc.createdBy === req.user?.name || doc.createdBy === req.user?.username);
+
+  if (!isSocietyAdmin && !isCreator) {
+    throw httpError(403, "You do not have permission to delete this notice");
+  }
+
+  await doc.deleteOne();
+  res.json({ deleted: req.params.id, message: "Notice deleted successfully" });
 }));
 
 export default router;

@@ -73,13 +73,26 @@ router.post("/posts/:id/comments", asyncHandler(async (req, res) => {
 }));
 
 router.delete("/posts/:id", asyncHandler(async (req, res) => {
-  const doc = await CommunityPost.findOne({ id: req.params.id });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await CommunityPost.findOne(query);
   if (!doc) throw httpError(404, "Post not found");
-  if (req.user.role !== ADMIN && doc.author !== req.user.name) {
+
+  const role = String(req.user?.role || "").toLowerCase();
+  const isSocietyAdmin = role === "admin" || role === "secretary";
+  const isCreator = doc.author && (doc.author === req.user?.name || doc.author === req.user?.username);
+
+  if (!isSocietyAdmin && !isCreator) {
     throw httpError(403, "You can only delete your own posts");
   }
   await doc.deleteOne();
-  res.json({ deleted: req.params.id });
+  res.json({ deleted: req.params.id, message: "Community post deleted successfully" });
 }));
 
 export default router;
