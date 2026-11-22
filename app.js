@@ -119,6 +119,9 @@ app.get("/api/health", (req, res) => {
 });
 
 const apkCandidates = [
+  path.join(__dirname, "downloads", "MyApartment.apk"),
+  path.join(process.cwd(), "downloads", "MyApartment.apk"),
+  path.join(__dirname, "MyApartment.apk"),
   "C:\\Users\\ASUS\\OneDrive\\Desktop\\MyApartment.apk",
   "C:\\Users\\ASUS\\OneDrive\\Desktop\\Chaitanya\\Mini Project\\My-Apartment-with-backend (1)\\smart-society\\frontend\\android\\app\\build\\outputs\\apk\\debug\\app-debug.apk",
   "D:\\New folder\\My-Apartment-upgraded-v2\\My-Apartment-with-backend\\smart-society\\frontend\\android\\app\\build\\outputs\\apk\\debug\\app-debug.apk",
