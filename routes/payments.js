@@ -143,8 +143,19 @@ router.post("/:id/pay", asyncHandler(async (req, res) => {
   res.json(doc);
 }));
 
+const queryForId = (idParam) => {
+  const reqId = String(idParam || "").trim();
+  return {
+    $or: [
+      { id: reqId },
+      { id: idParam },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+};
+
 router.patch("/:id/approve", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Payment.findOne({ id: req.params.id });
+  const doc = await Payment.findOne(queryForId(req.params.id));
   if (!doc) throw httpError(404, "Payment record not found");
   if (doc.status === "Paid") throw httpError(409, "Payment is already marked as Paid");
 
@@ -170,7 +181,7 @@ router.patch("/:id/approve", requireRole(ADMIN), asyncHandler(async (req, res) =
 }));
 
 router.patch("/:id/reject", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Payment.findOne({ id: req.params.id });
+  const doc = await Payment.findOne(queryForId(req.params.id));
   if (!doc) throw httpError(404, "Payment record not found");
 
   const reason = String(req.body.reason || "").trim() || "Payment reference not verified in society bank account";
@@ -192,12 +203,42 @@ router.patch("/:id/reject", requireRole(ADMIN), asyncHandler(async (req, res) =>
 }));
 
 router.patch("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Payment.findOneAndUpdate(
-    { id: req.params.id },
-    { $set: pick(req.body, ["status", "amount", "method", "date"]) },
-    { new: true, runValidators: true }
-  );
+  const doc = await Payment.findOne(queryForId(req.params.id));
   if (!doc) throw httpError(404, "Payment record not found");
+
+  const fields = pick(req.body, [
+    "status",
+    "amount",
+    "method",
+    "date",
+    "approvedBy",
+    "approvedAt",
+    "paidAt",
+    "rejectionReason",
+    "transactionRef",
+  ]);
+
+  Object.assign(doc, fields);
+
+  if (fields.status === "Paid") {
+    doc.status = "Paid";
+    doc.paidAt = doc.paidAt || new Date();
+    doc.date = doc.date || fmtDate(new Date());
+    doc.approvedBy = req.user?.name || "Society Admin";
+    doc.approvedAt = new Date();
+    doc.rejectionReason = undefined;
+
+    await notifyFlat(doc.flat, {
+      type: "System",
+      title: `✅ Payment Approved & Received: ₹${doc.amount}`,
+      message: `Your maintenance payment of ₹${doc.amount.toLocaleString("en-IN")} for ${doc.month} has been approved and received by ${req.user?.name || "Admin"}. Your official receipt is ready!`,
+      link: "/payments",
+      refId: doc.id,
+      createdBy: req.user?.name || "Admin",
+    });
+  }
+
+  await doc.save();
   logSaved("payments (updated)", doc);
   res.json(doc);
 }));
