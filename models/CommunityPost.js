@@ -11,6 +11,7 @@ const schema = new mongoose.Schema(
     likes: [{ type: String, _id: false }],
     comments: [
       {
+        id: { type: String },
         author: { type: String, required: true },
         flat: { type: String, default: "" },
         text: { type: String, required: true },

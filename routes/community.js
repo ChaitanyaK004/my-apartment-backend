@@ -79,7 +79,9 @@ router.post("/posts/:id/comments", asyncHandler(async (req, res) => {
   const doc = await CommunityPost.findOne(query);
   if (!doc) throw httpError(404, "Post not found");
   if (!doc.comments) doc.comments = [];
+  const commentId = "cmt-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
   doc.comments.push({
+    id: commentId,
     author: req.user.name,
     flat: req.user.flat || (req.user.role === "Admin" ? "Management Office" : ""),
     text,
@@ -90,6 +92,53 @@ router.post("/posts/:id/comments", asyncHandler(async (req, res) => {
   const userId = req.user._id.toString();
   j.hasLiked = (doc.likes || []).includes(userId);
   res.status(201).json(j);
+}));
+
+router.delete("/posts/:id/comments/:commentId", asyncHandler(async (req, res) => {
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await CommunityPost.findOne(query);
+  if (!doc) throw httpError(404, "Post not found");
+
+  const target = req.params.commentId;
+  const isNumericIndex = !isNaN(Number(target)) && Number(target) >= 0 && Number(target) < (doc.comments || []).length;
+
+  let commentIndex = -1;
+  if (isNumericIndex) {
+    commentIndex = parseInt(target, 10);
+  } else {
+    commentIndex = (doc.comments || []).findIndex(
+      (c) => c.id === target || String(c._id) === target
+    );
+  }
+
+  if (commentIndex === -1) {
+    throw httpError(404, "Comment not found");
+  }
+
+  const comment = doc.comments[commentIndex];
+  const role = String(req.user?.role || "").toLowerCase();
+  const isSocietyAdmin = role === "admin" || role === "secretary";
+  const isCommentAuthor = comment.author && (comment.author === req.user?.name || comment.author === req.user?.username);
+  const isPostAuthor = doc.author && (doc.author === req.user?.name || doc.author === req.user?.username);
+
+  if (!isSocietyAdmin && !isCommentAuthor && !isPostAuthor) {
+    throw httpError(403, "You do not have permission to delete this comment");
+  }
+
+  doc.comments.splice(commentIndex, 1);
+  await doc.save();
+
+  const j = doc.toJSON();
+  const userId = req.user._id.toString();
+  j.hasLiked = (doc.likes || []).includes(userId);
+  res.json(j);
 }));
 
 router.delete("/posts/:id", asyncHandler(async (req, res) => {
