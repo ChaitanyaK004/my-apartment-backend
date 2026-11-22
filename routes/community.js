@@ -41,7 +41,15 @@ router.post("/posts", asyncHandler(async (req, res) => {
 }));
 
 router.post("/posts/:id/like", asyncHandler(async (req, res) => {
-  const doc = await CommunityPost.findOne({ id: req.params.id });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await CommunityPost.findOne(query);
   if (!doc) throw httpError(404, "Post not found");
   const userId = req.user._id.toString();
   if (!doc.likes) doc.likes = [];
@@ -60,16 +68,28 @@ router.post("/posts/:id/like", asyncHandler(async (req, res) => {
 router.post("/posts/:id/comments", asyncHandler(async (req, res) => {
   const text = String(req.body.text || "").trim();
   if (!text) throw httpError(400, "Comment cannot be empty");
-  const doc = await CommunityPost.findOne({ id: req.params.id });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await CommunityPost.findOne(query);
   if (!doc) throw httpError(404, "Post not found");
+  if (!doc.comments) doc.comments = [];
   doc.comments.push({
     author: req.user.name,
-    flat: req.user.flat || "",
+    flat: req.user.flat || (req.user.role === "Admin" ? "Management Office" : ""),
     text,
     createdAt: new Date(),
   });
   await doc.save();
-  res.status(201).json(doc);
+  const j = doc.toJSON();
+  const userId = req.user._id.toString();
+  j.hasLiked = (doc.likes || []).includes(userId);
+  res.status(201).json(j);
 }));
 
 router.delete("/posts/:id", asyncHandler(async (req, res) => {
