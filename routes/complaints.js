@@ -70,9 +70,9 @@ router.post("/", asyncHandler(async (req, res) => {
   const admins = await User.find({ role: ADMIN, _id: { $ne: req.user._id } }, { _id: 1 });
   await notifyUsers(admins, {
     type: "Complaint",
-    title: isPersonal ? `🔒 Confidential Complaint: ${doc.title}` : `New ${doc.priority || "Normal"} Complaint: ${doc.title}`,
+    title: isPersonal ? `Personal Complaint: ${doc.title}` : `New ${doc.priority || "Normal"} Complaint: ${doc.title}`,
     message: isPersonal
-      ? `🔒 Personal Complaint: ${doc.resident} (Flat ${doc.flat}) sent a confidential complaint directly to Admin.`
+      ? `Personal Complaint: ${doc.resident} (Flat ${doc.flat}) sent a personal complaint to Admin.`
       : `${doc.resident} (Flat ${doc.flat}) reported: ${doc.title} (${doc.category}).`,
     link: "/complaints",
     refId: doc.id,
@@ -106,7 +106,7 @@ router.patch("/:id", requireRole(ADMIN, GUARD, MAINTENANCE), asyncHandler(async 
   logSaved("complaints (updated)", doc);
   if (update.status && before?.status !== doc.status) {
     await notifyFlat(doc.flat, {
-      type: "Complaint", title: isPersonalComplaint ? `🔒 Confidential complaint ${doc.status.toLowerCase()}` : `Complaint ${doc.status.toLowerCase()}`,
+      type: "Complaint", title: isPersonalComplaint ? `Personal complaint ${doc.status.toLowerCase()}` : `Complaint ${doc.status.toLowerCase()}`,
       message: `Your complaint "${doc.title}" (${doc.id}) is now ${doc.status}.`,
       link: "/complaints", refId: doc.id, createdBy: req.user.name,
     });
@@ -140,14 +140,14 @@ router.post("/:id/comments", asyncHandler(async (req, res) => {
     const admins = await User.find({ role: ADMIN }, { _id: 1 });
     await notifyUsers(admins, {
       type: "Complaint",
-      title: isPersonalComplaint ? `🔒 Confidential update on ${doc.id}` : `Update on complaint ${doc.id}`,
+      title: isPersonalComplaint ? `Personal update on ${doc.id}` : `Update on complaint ${doc.id}`,
       message: `${req.user.name} (${doc.flat}): ${text.slice(0, 150)}`,
       link: "/complaints", refId: doc.id, createdBy: req.user.name,
     });
   } else {
     await notifyFlat(doc.flat, {
       type: "Complaint",
-      title: isPersonalComplaint ? `🔒 Admin response on ${doc.id}` : `New update on complaint ${doc.id}`,
+      title: isPersonalComplaint ? `Admin response on ${doc.id}` : `New update on complaint ${doc.id}`,
       message: `${req.user.name} (${req.user.role}): ${text.slice(0, 150)}`,
       link: "/complaints", refId: doc.id, createdBy: req.user.name,
     });
