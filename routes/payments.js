@@ -243,10 +243,26 @@ router.patch("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
   res.json(doc);
 }));
 
-router.delete("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Payment.findOneAndDelete({ id: req.params.id });
+router.post("/:id/remind", requireRole(ADMIN), asyncHandler(async (req, res) => {
+  const doc = await Payment.findOne(queryForId(req.params.id));
   if (!doc) throw httpError(404, "Payment record not found");
-  res.json({ deleted: req.params.id });
+
+  await notifyFlat(doc.flat, {
+    type: "Billing",
+    title: `🔔 Maintenance Reminder: ₹${(doc.amount || 0).toLocaleString("en-IN")}`,
+    message: `Gentle reminder: Maintenance payment for ${doc.month} (₹${(doc.amount || 0).toLocaleString("en-IN")}) is currently ${doc.status}. Please clear your dues at your earliest convenience.`,
+    link: "/payments",
+    refId: doc.id,
+    createdBy: req.user?.name || "Society Admin",
+  });
+
+  res.json({ success: true, message: `Reminder sent to Flat ${doc.flat}` });
+}));
+
+router.delete("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
+  const doc = await Payment.findOneAndDelete(queryForId(req.params.id));
+  if (!doc) throw httpError(404, "Payment record not found");
+  res.json({ deleted: req.params.id, id: doc.id });
 }));
 
 export default router;
