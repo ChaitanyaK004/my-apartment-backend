@@ -1,4 +1,5 @@
 import { Router } from "express";
+import mongoose from "mongoose";
 import FacilityBooking from "../models/FacilityBooking.js";
 import { createWithId } from "../utils/nextId.js";
 import { asyncHandler, httpError } from "../middleware/errors.js";
@@ -121,8 +122,14 @@ router.post("/bookings", asyncHandler(async (req, res) => {
   res.status(201).json(doc);
 }));
 
-router.patch("/bookings/:id/approve", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await FacilityBooking.findOne({ id: req.params.id });
+router.patch("/bookings/:id/approve", requireRole(ADMIN, "admin", "Secretary", "secretary"), asyncHandler(async (req, res) => {
+  const doc = await FacilityBooking.findOne({
+    $or: [
+      { id: req.params.id },
+      { id: req.params.id.trim() },
+      ...(mongoose.isValidObjectId(req.params.id) ? [{ _id: req.params.id }] : []),
+    ],
+  });
   if (!doc) throw httpError(404, "Booking not found");
   doc.status = "Confirmed";
   doc.approvedBy = req.user.name;
@@ -141,8 +148,14 @@ router.patch("/bookings/:id/approve", requireRole(ADMIN), asyncHandler(async (re
   res.json(doc);
 }));
 
-router.patch("/bookings/:id/reject", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await FacilityBooking.findOne({ id: req.params.id });
+router.patch("/bookings/:id/reject", requireRole(ADMIN, "admin", "Secretary", "secretary"), asyncHandler(async (req, res) => {
+  const doc = await FacilityBooking.findOne({
+    $or: [
+      { id: req.params.id },
+      { id: req.params.id.trim() },
+      ...(mongoose.isValidObjectId(req.params.id) ? [{ _id: req.params.id }] : []),
+    ],
+  });
   if (!doc) throw httpError(404, "Booking not found");
   doc.status = "Rejected";
   doc.approvedBy = req.user.name;
@@ -159,6 +172,26 @@ router.patch("/bookings/:id/reject", requireRole(ADMIN), asyncHandler(async (req
     createdBy: req.user.name,
   });
 
+  res.json(doc);
+}));
+
+router.patch("/bookings/:id", requireRole(ADMIN, "admin", "Secretary", "secretary"), asyncHandler(async (req, res) => {
+  const doc = await FacilityBooking.findOne({
+    $or: [
+      { id: req.params.id },
+      { id: req.params.id.trim() },
+      ...(mongoose.isValidObjectId(req.params.id) ? [{ _id: req.params.id }] : []),
+    ],
+  });
+  if (!doc) throw httpError(404, "Booking not found");
+  if (req.body.status) doc.status = req.body.status;
+  if (req.body.status === "Confirmed") doc.approvedBy = req.user.name;
+  if (req.body.status === "Rejected") {
+    doc.approvedBy = req.user.name;
+    if (req.body.reason) doc.rejectionReason = str(req.body.reason);
+  }
+  await doc.save();
+  logSaved("facility_bookings (status updated)", doc);
   res.json(doc);
 }));
 
