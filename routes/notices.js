@@ -54,7 +54,15 @@ router.post("/", asyncHandler(async (req, res) => {
 }));
 
 router.patch("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Notice.findOneAndUpdate({ id: req.params.id }, { $set: pick(req.body, ["title", "body", "pinned", "category", "audience"]) }, { new: true, runValidators: true });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await Notice.findOneAndUpdate(query, { $set: pick(req.body, ["title", "body", "pinned", "category", "audience"]) }, { new: true, runValidators: true });
   if (!doc) throw httpError(404, "Notice not found");
   res.json(doc);
 }));
@@ -62,7 +70,15 @@ router.patch("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
 // A resident clicked "Acknowledge" -> reads + 1 (deduped per user)
 router.post("/:id/read", asyncHandler(async (req, res) => {
   const readerId = req.user.username || req.user.email || req.user._id.toString();
-  const doc = await Notice.findOne({ id: req.params.id });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await Notice.findOne(query);
   if (!doc) throw httpError(404, "Notice not found");
   if (!doc.readers) doc.readers = [];
   if (!doc.readers.includes(readerId)) {
@@ -73,16 +89,45 @@ router.post("/:id/read", asyncHandler(async (req, res) => {
   res.json(doc);
 }));
 
-// Poll vote. One vote per logged-in user; voting again changes the vote.
+// Poll vote. Allows voting on choices without discarding other votes. Tapping an option toggles that choice.
 router.post("/:id/vote", asyncHandler(async (req, res) => {
-  const doc = await Notice.findOne({ id: req.params.id });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: req.params.id },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await Notice.findOne(query);
   if (!doc) throw httpError(404, "Notice not found");
   if (doc.type !== "Poll") throw httpError(400, "This notice is not a poll");
   const index = Number(req.body.optionIndex);
-  const voter = req.user.username || req.user.email || req.user.name;
-  if (!Number.isInteger(index) || index < 0 || index >= doc.pollOptions.length) throw httpError(400, "Invalid poll option");
-  doc.voters = doc.voters.filter((v) => v.voter !== voter);
-  doc.voters.push({ voter, optionIndex: index });
+  if (!Number.isInteger(index) || index < 0 || index >= (doc.pollOptions || []).length) {
+    throw httpError(400, "Invalid poll option");
+  }
+
+  const voter =
+    req.body.voter ||
+    req.user?.username ||
+    req.user?.email ||
+    req.user?.name ||
+    "resident";
+
+  if (!doc.voters) doc.voters = [];
+
+  const alreadyVotedOption = doc.voters.some(
+    (v) => v.voter === voter && v.optionIndex === index
+  );
+
+  if (alreadyVotedOption) {
+    doc.voters = doc.voters.filter(
+      (v) => !(v.voter === voter && v.optionIndex === index)
+    );
+  } else {
+    doc.voters.push({ voter, optionIndex: index });
+  }
+
   await doc.save();
   logSaved("notices (vote)", doc);
   res.json(doc);
