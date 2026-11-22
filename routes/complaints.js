@@ -26,33 +26,54 @@ router.get("/", asyncHandler(async (req, res) => {
 
   const filter = {};
   for (const k of ["status", "category", "flat", "priority"]) if (req.query[k]) filter[k] = str(req.query[k]);
-  // Residents only see their own flat's complaints
-  if (isResident(req.user)) filter.flat = req.user.flat || "__none__";
+
+  // Residents only see their own flat's complaints (never other residents' personal or normal complaints)
+  if (isResident(req.user)) {
+    filter.flat = req.user.flat || "__none__";
+  }
+
+  // Maintenance Staff and Security Guards NEVER see Personal Complaints
+  if (
+    req.user.role === MAINTENANCE ||
+    req.user.role === "Maintenance Staff" ||
+    req.user.role === GUARD ||
+    req.user.role === "Security Guard"
+  ) {
+    filter.category = { $nin: ["Personal Complaint", "Personal"] };
+    filter.isPersonal = { $ne: true };
+  }
+
   res.json(await Complaint.find(filter).sort({ createdAt: -1 }));
 }));
 
 router.post("/", asyncHandler(async (req, res) => {
   const { title, category = "Other", priority, description, residenceName } = req.body;
+  const isPersonal = category === "Personal Complaint" || category === "Personal" || Boolean(req.body.isPersonal);
+
   // A resident always raises complaints for their own flat; staff/admin can specify flat/area
   const resident = isResident(req.user) ? req.user.name : (req.body.resident || req.user.name);
   const flat = isResident(req.user) ? req.user.flat : (req.body.flat || (req.user.role === "Maintenance Staff" ? "Maintenance" : "Common Area"));
-  // Default problems (Water / Electricity / Parking) get their title automatically;
+
+  // Default problems (Water / Electricity / Parking / Personal) get their title automatically;
   // "Write your own problem" (category Other) must come with the user's own title.
   const finalTitle = String(title || DEFAULT_TITLES[category] || "").trim();
   if (!finalTitle) throw httpError(400, "Pick a problem or write your own");
+
   const doc = await createWithId(
     Complaint,
-    { title: finalTitle, category, priority, description, resident, flat, residenceName },
+    { title: finalTitle, category, priority, description, resident, flat, residenceName, isPersonal },
     "complaint", "C", 3
   );
   logSaved("complaints", doc);
 
-  // Instantly alert all Admins so resident requests arrive immediately
+  // Instantly alert all Admins (Maintenance Staff and Guards are NOT alerted for personal complaints)
   const admins = await User.find({ role: ADMIN, _id: { $ne: req.user._id } }, { _id: 1 });
   await notifyUsers(admins, {
     type: "Complaint",
-    title: `New ${doc.priority || "Normal"} Complaint: ${doc.title}`,
-    message: `${doc.resident} (Flat ${doc.flat}) reported: ${doc.title} (${doc.category}).`,
+    title: isPersonal ? `🔒 Confidential Complaint: ${doc.title}` : `New ${doc.priority || "Normal"} Complaint: ${doc.title}`,
+    message: isPersonal
+      ? `🔒 Personal Complaint: ${doc.resident} (Flat ${doc.flat}) sent a confidential complaint directly to Admin.`
+      : `${doc.resident} (Flat ${doc.flat}) reported: ${doc.title} (${doc.category}).`,
     link: "/complaints",
     refId: doc.id,
     createdBy: req.user.name,
@@ -62,10 +83,16 @@ router.post("/", asyncHandler(async (req, res) => {
 }));
 
 router.patch("/:id", requireRole(ADMIN, GUARD, MAINTENANCE), asyncHandler(async (req, res) => {
-  const update = pick(req.body, ["status", "priority", "description"]);
-  const before = await Complaint.findOne({ id: req.params.id }, { status: 1 });
+  const before = await Complaint.findOne({ id: req.params.id });
   if (!before) throw httpError(404, "Complaint not found");
 
+  const isPersonalComplaint = before.category === "Personal Complaint" || before.category === "Personal" || before.isPersonal;
+  // Maintenance staff and guards CANNOT view or modify personal complaints
+  if (isPersonalComplaint && req.user.role !== ADMIN) {
+    throw httpError(403, "Personal complaints can only be managed by Society Admins.");
+  }
+
+  const update = pick(req.body, ["status", "priority", "description"]);
   const updateDoc = { $set: update };
   if (update.status === "Resolved") {
     // When complaint is solved, stamp resolvedAt to start the 7-day retention countdown
@@ -79,7 +106,7 @@ router.patch("/:id", requireRole(ADMIN, GUARD, MAINTENANCE), asyncHandler(async 
   logSaved("complaints (updated)", doc);
   if (update.status && before?.status !== doc.status) {
     await notifyFlat(doc.flat, {
-      type: "Complaint", title: `Complaint ${doc.status.toLowerCase()}`,
+      type: "Complaint", title: isPersonalComplaint ? `🔒 Confidential complaint ${doc.status.toLowerCase()}` : `Complaint ${doc.status.toLowerCase()}`,
       message: `Your complaint "${doc.title}" (${doc.id}) is now ${doc.status}.`,
       link: "/complaints", refId: doc.id, createdBy: req.user.name,
     });
@@ -92,9 +119,19 @@ router.post("/:id/comments", asyncHandler(async (req, res) => {
   if (!text) throw httpError(400, "Comment text is required");
   const doc = await Complaint.findOne({ id: req.params.id });
   if (!doc) throw httpError(404, "Complaint not found");
-  if (isResident(req.user) && doc.flat !== req.user.flat) {
-    throw httpError(403, "You can only comment on your own complaints");
+
+  const isPersonalComplaint = doc.category === "Personal Complaint" || doc.category === "Personal" || doc.isPersonal;
+  if (isPersonalComplaint && req.user.role !== ADMIN && !isResident(req.user)) {
+    throw httpError(403, "Only Admin and the resident can comment on personal complaints");
   }
+
+  if (isResident(req.user)) {
+    const flatMatches = String(doc.flat || "").trim().toLowerCase() === String(req.user.flat || "").trim().toLowerCase();
+    if (!flatMatches) {
+      throw httpError(403, "You can only comment on your own complaints");
+    }
+  }
+
   doc.comments.push({ author: req.user.name, role: req.user.role, text, date: new Date() });
   await doc.save();
   logSaved("complaints (comment)", doc);
@@ -103,14 +140,14 @@ router.post("/:id/comments", asyncHandler(async (req, res) => {
     const admins = await User.find({ role: ADMIN }, { _id: 1 });
     await notifyUsers(admins, {
       type: "Complaint",
-      title: `Update on complaint ${doc.id}`,
+      title: isPersonalComplaint ? `🔒 Confidential update on ${doc.id}` : `Update on complaint ${doc.id}`,
       message: `${req.user.name} (${doc.flat}): ${text.slice(0, 150)}`,
       link: "/complaints", refId: doc.id, createdBy: req.user.name,
     });
   } else {
     await notifyFlat(doc.flat, {
       type: "Complaint",
-      title: `New update on complaint ${doc.id}`,
+      title: isPersonalComplaint ? `🔒 Admin response on ${doc.id}` : `New update on complaint ${doc.id}`,
       message: `${req.user.name} (${req.user.role}): ${text.slice(0, 150)}`,
       link: "/complaints", refId: doc.id, createdBy: req.user.name,
     });

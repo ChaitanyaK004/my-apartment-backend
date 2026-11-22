@@ -6,9 +6,16 @@ export const DEFAULT_CATEGORIES = [
   { label: "Water Problem", category: "Water" },
   { label: "Electricity Problem", category: "Electrical" },
   { label: "Parking Problem", category: "Parking" },
+  { label: "Personal Complaint (Admin Only)", category: "Personal Complaint" },
   { label: "Write your own problem", category: "Other" },
 ];
-export const DEFAULT_TITLES = { Water: "Water Problem", Electrical: "Electricity Problem", Parking: "Parking Problem" };
+export const DEFAULT_TITLES = {
+  Water: "Water Problem",
+  Electrical: "Electricity Problem",
+  Parking: "Parking Problem",
+  "Personal Complaint": "Personal Complaint to Admin",
+  Personal: "Personal Complaint to Admin",
+};
 
 const schema = new mongoose.Schema(
   {
@@ -18,9 +25,10 @@ const schema = new mongoose.Schema(
     flat: { type: String, required: [true, "Flat number is required"], trim: true, uppercase: true },
     category: {
       type: String,
-      enum: ["Water", "Electrical", "Plumbing", "Parking", "Common Area", "Security", "Other"],
+      enum: ["Water", "Electrical", "Plumbing", "Parking", "Common Area", "Security", "Other", "Personal Complaint", "Personal"],
       default: "Other",
     },
+    isPersonal: { type: Boolean, default: false },
     title: { type: String, required: [true, "Complaint title is required"], trim: true },
     description: { type: String, required: [true, "Please describe the problem"], trim: true },
     priority: { type: String, enum: ["Low", "Medium", "High"], default: "Medium" },
