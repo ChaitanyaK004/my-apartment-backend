@@ -17,6 +17,16 @@ const schema = new mongoose.Schema(
     moveInDate: { type: Date, default: Date.now },
     username: { type: String, trim: true, lowercase: true }, // linked login account (set when the resident signs up)
     source: { type: String, enum: ["Admin", "Self Registration"], default: "Admin" },
+    members: [
+      {
+        id: { type: String },
+        name: { type: String, required: true },
+        relationship: { type: String, required: true },
+        phone: { type: String },
+        verified: { type: Boolean, default: true },
+        addedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true, id: false }
 );

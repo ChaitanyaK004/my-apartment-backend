@@ -166,6 +166,58 @@ router.patch("/me", requireAuth, asyncHandler(async (req, res) => {
   res.json({ user });
 }));
 
+// GET /api/auth/me/members - get household members
+router.get("/me/members", requireAuth, asyncHandler(async (req, res) => {
+  const user = req.user;
+  res.json({ members: user.members || [] });
+}));
+
+// POST /api/auth/me/members - add household member
+router.post("/me/members", requireAuth, asyncHandler(async (req, res) => {
+  const user = req.user;
+  const { name, relationship, phone } = req.body;
+  if (!String(name || "").trim()) throw httpError(400, "Member name is required");
+
+  const newMember = {
+    id: req.body.id || `mem-${Date.now()}`,
+    name: String(name).trim(),
+    relationship: String(relationship || "Family Member").trim(),
+    phone: phone ? String(phone).trim() : "",
+    verified: true,
+    addedAt: new Date(),
+  };
+
+  user.members = user.members || [];
+  user.members.push(newMember);
+  await user.save();
+
+  if (user.role === "Resident") {
+    await Resident.updateOne(
+      { $or: [{ username: user.username }, ...(user.flat ? [{ flat: user.flat }] : [])] },
+      { $push: { members: newMember } }
+    );
+  }
+
+  res.status(201).json({ success: true, member: newMember, members: user.members });
+}));
+
+// DELETE /api/auth/me/members/:id - remove household member
+router.delete("/me/members/:id", requireAuth, asyncHandler(async (req, res) => {
+  const user = req.user;
+  const targetId = String(req.params.id);
+  user.members = (user.members || []).filter((m) => m.id !== targetId && m.name !== targetId);
+  await user.save();
+
+  if (user.role === "Resident") {
+    await Resident.updateOne(
+      { $or: [{ username: user.username }, ...(user.flat ? [{ flat: user.flat }] : [])] },
+      { $pull: { members: { $or: [{ id: targetId }, { name: targetId }] } } }
+    );
+  }
+
+  res.json({ success: true, members: user.members });
+}));
+
 // Admin only: list every login account (no passwords are returned)
 router.get("/users", requireAuth, requireRole("Admin"), asyncHandler(async (req, res) => {
   res.json(await User.find().sort({ role: 1, createdAt: 1 }));

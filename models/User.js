@@ -13,6 +13,16 @@ const schema = new mongoose.Schema(
     role: { type: String, enum: ROLES, default: "Resident" },
     flat: { type: String, trim: true, uppercase: true },
     phone: { type: String, trim: true },
+    members: [
+      {
+        id: { type: String },
+        name: { type: String, required: true },
+        relationship: { type: String, required: true },
+        phone: { type: String },
+        verified: { type: Boolean, default: true },
+        addedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );
