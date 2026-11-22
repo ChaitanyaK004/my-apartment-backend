@@ -130,10 +130,35 @@ router.patch("/:id", asyncHandler(async (req, res) => {
   res.json(doc);
 }));
 
-router.delete("/:id", requireRole(ADMIN), asyncHandler(async (req, res) => {
-  const doc = await Visitor.findOneAndDelete({ id: req.params.id });
+const queryForId = (idParam) => {
+  const reqId = String(idParam || "").trim();
+  return {
+    $or: [
+      { id: reqId },
+      { id: idParam },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+};
+
+router.delete("/:id", asyncHandler(async (req, res) => {
+  const doc = await Visitor.findOne(queryForId(req.params.id));
   if (!doc) throw httpError(404, "Visitor not found");
-  res.json({ deleted: req.params.id });
+
+  const userRole = (req.user?.role || "").toLowerCase();
+  const isAuthStaff = ["admin", "guard", "security guard", "secretary"].includes(userRole);
+
+  if (isResident(req.user)) {
+    if (doc.flat !== req.user.flat) {
+      throw httpError(403, "You can only delete visitor entries for your own flat");
+    }
+  } else if (!isAuthStaff) {
+    throw httpError(403, "Permission denied to delete visitor record");
+  }
+
+  await Visitor.deleteOne({ _id: doc._id });
+  logSaved("visitors (deleted)", doc);
+  res.json({ deleted: doc.id, id: doc.id });
 }));
 
 export default router;
