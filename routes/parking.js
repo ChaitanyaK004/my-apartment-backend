@@ -75,6 +75,9 @@ router.post("/", asyncHandler(async (req, res) => {
     if (!req.user.flat) throw httpError(400, "Your account has no flat number. Please contact admin.");
     data.flat = req.user.flat;
     data.residentName = req.user.name;
+  } else {
+    data.residentName = req.user?.name || "Society Admin";
+    if (!data.flat) data.flat = req.user?.flat || "Management";
   }
   if (!data.fromTime || !data.toTime) throw httpError(400, "Start and end times are required");
   if (new Date(data.fromTime) >= new Date(data.toTime)) throw httpError(400, "End time must be after start time");
