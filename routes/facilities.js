@@ -13,11 +13,11 @@ const router = Router();
 
 function timeToMinutes(tStr) {
   if (!tStr) return null;
-  const match = tStr.trim().match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  const match = tStr.trim().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
   if (!match) return null;
   let [_, hours, mins, modifier] = match;
   hours = parseInt(hours, 10);
-  mins = parseInt(mins, 10);
+  mins = mins ? parseInt(mins, 10) : 0;
   if (modifier) {
     if (modifier.toUpperCase() === "PM" && hours < 12) hours += 12;
     if (modifier.toUpperCase() === "AM" && hours === 12) hours = 0;
