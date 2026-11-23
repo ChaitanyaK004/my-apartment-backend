@@ -125,8 +125,29 @@ router.delete("/posts/:id/comments/:commentId", asyncHandler(async (req, res) =>
   const comment = doc.comments[commentIndex];
   const role = String(req.user?.role || "").toLowerCase();
   const isSocietyAdmin = role === "admin" || role === "secretary";
-  const isCommentAuthor = comment.author && (comment.author === req.user?.name || comment.author === req.user?.username);
-  const isPostAuthor = doc.author && (doc.author === req.user?.name || doc.author === req.user?.username);
+
+  const userName = String(req.user?.name || "").trim().toLowerCase();
+  const userUsername = String(req.user?.username || "").trim().toLowerCase();
+  const commentAuthor = String(comment?.author || "").trim().toLowerCase();
+  const postAuthor = String(doc?.author || "").trim().toLowerCase();
+
+  const isCommentAuthor =
+    (commentAuthor && (
+      commentAuthor === userName ||
+      commentAuthor === userUsername ||
+      commentAuthor.startsWith(userName) ||
+      userName.startsWith(commentAuthor)
+    )) ||
+    (comment?.flat && req.user?.flat && String(comment.flat).trim().toLowerCase() === String(req.user.flat).trim().toLowerCase());
+
+  const isPostAuthor =
+    (postAuthor && (
+      postAuthor === userName ||
+      postAuthor === userUsername ||
+      postAuthor.startsWith(userName) ||
+      userName.startsWith(postAuthor)
+    )) ||
+    (doc?.flat && req.user?.flat && String(doc.flat).trim().toLowerCase() === String(req.user.flat).trim().toLowerCase());
 
   if (!isSocietyAdmin && !isCommentAuthor && !isPostAuthor) {
     throw httpError(403, "You do not have permission to delete this comment");

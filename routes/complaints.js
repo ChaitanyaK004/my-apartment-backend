@@ -166,6 +166,46 @@ router.post("/:id/comments", asyncHandler(async (req, res) => {
   res.status(201).json(doc);
 }));
 
+router.delete("/:id/comments/:commentIndex", asyncHandler(async (req, res) => {
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: reqId.toUpperCase() },
+      { id: reqId.toLowerCase() },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await Complaint.findOne(query);
+  if (!doc) throw httpError(404, "Complaint not found");
+
+  const target = req.params.commentIndex;
+  const isNumeric = !isNaN(Number(target)) && Number(target) >= 0 && Number(target) < (doc.comments || []).length;
+  let idx = -1;
+  if (isNumeric) {
+    idx = parseInt(target, 10);
+  } else {
+    idx = (doc.comments || []).findIndex((c) => String(c._id) === target || c.id === target);
+  }
+  if (idx === -1) throw httpError(404, "Comment not found");
+
+  const cm = doc.comments[idx];
+  const isSocietyAdmin = req.user?.role === ADMIN || String(req.user?.role || "").toLowerCase() === "admin";
+  const userName = String(req.user?.name || "").trim().toLowerCase();
+  const cmAuthor = String(cm.author || "").trim().toLowerCase();
+  const isAuthor = cmAuthor && (cmAuthor === userName || cmAuthor.startsWith(userName) || userName.startsWith(cmAuthor));
+  const isComplaintOwner = doc.flat && req.user?.flat && String(doc.flat).trim().toLowerCase() === String(req.user.flat).trim().toLowerCase();
+
+  if (!isSocietyAdmin && !isAuthor && !isComplaintOwner) {
+    throw httpError(403, "You do not have permission to delete this comment");
+  }
+
+  doc.comments.splice(idx, 1);
+  await doc.save();
+  logSaved("complaints (comment deleted)", doc);
+  res.json(doc);
+}));
+
 router.delete("/:id", asyncHandler(async (req, res) => {
   const reqId = String(req.params.id || "").trim();
   const query = {
