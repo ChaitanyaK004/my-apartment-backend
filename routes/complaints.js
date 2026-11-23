@@ -47,6 +47,17 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 router.post("/", asyncHandler(async (req, res) => {
+  // Maintenance Staff and Security Guards do NOT have authority to raise complaints
+  const isStaff =
+    req.user?.role === "Maintenance Staff" ||
+    req.user?.role === "Security Guard" ||
+    req.user?.role === MAINTENANCE ||
+    req.user?.role === GUARD;
+
+  if (isStaff) {
+    throw httpError(403, "Maintenance team and security guards do not have authority to raise complaints. Only residents can raise complaints.");
+  }
+
   const { title, category = "Other", priority, description, residenceName } = req.body;
   const isPersonal = category === "Personal Complaint" || category === "Personal" || Boolean(req.body.isPersonal);
 
@@ -156,29 +167,40 @@ router.post("/:id/comments", asyncHandler(async (req, res) => {
 }));
 
 router.delete("/:id", asyncHandler(async (req, res) => {
-  const doc = await Complaint.findOne({ id: req.params.id });
+  const reqId = String(req.params.id || "").trim();
+  const query = {
+    $or: [
+      { id: reqId },
+      { id: reqId.toUpperCase() },
+      { id: reqId.toLowerCase() },
+      ...(reqId.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: reqId }] : []),
+    ],
+  };
+  const doc = await Complaint.findOne(query);
   if (!doc) throw httpError(404, "Complaint not found");
 
+  const isSocietyAdmin =
+    req.user?.role === ADMIN ||
+    String(req.user?.role || "").toLowerCase() === "admin";
+
   // Admins can delete any complaint
-  if (req.user?.role === ADMIN) {
+  if (isSocietyAdmin) {
     await Complaint.deleteOne({ _id: doc._id });
-    logSaved("complaints (deleted by admin)", { id: req.params.id, deletedBy: req.user.name });
-    return res.json({ deleted: req.params.id });
+    logSaved("complaints (deleted by admin)", { id: doc.id || doc._id, deletedBy: req.user.name });
+    return res.json({ deleted: doc.id || doc._id, success: true, message: "Complaint deleted successfully" });
   }
 
-  // Residents can delete their own flat's complaint if it is still Pending (e.g. submitted by mistake)
-  if (isResident(req.user)) {
+  // Residents can delete complaints filed for their own flat (any status)
+  if (isResident(req.user) || String(req.user?.role || "").toLowerCase() === "resident") {
     const flatMatches =
+      !req.user.flat ||
       String(doc.flat || "").trim().toLowerCase() === String(req.user.flat || "").trim().toLowerCase();
     if (!flatMatches) {
       throw httpError(403, "You can only delete complaints filed for your own flat");
     }
-    if (doc.status !== "Pending") {
-      throw httpError(400, "You can only delete a complaint while it is Pending. Once In Progress or Resolved, complaints cannot be deleted.");
-    }
     await Complaint.deleteOne({ _id: doc._id });
-    logSaved("complaints (deleted by resident)", { id: req.params.id, deletedBy: req.user.name, flat: req.user.flat });
-    return res.json({ deleted: req.params.id });
+    logSaved("complaints (deleted by resident)", { id: doc.id || doc._id, deletedBy: req.user.name, flat: req.user.flat });
+    return res.json({ deleted: doc.id || doc._id, success: true, message: "Complaint deleted successfully" });
   }
 
   throw httpError(403, "You do not have permission to delete complaints");

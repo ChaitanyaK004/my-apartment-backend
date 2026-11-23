@@ -5,7 +5,7 @@ import { createWithId } from "../utils/nextId.js";
 import { asyncHandler, httpError } from "../middleware/errors.js";
 import { logSaved } from "../utils/log.js";
 import { pick, str } from "../utils/format.js";
-import { requireRole, ADMIN, isAdmin } from "../middleware/auth.js";
+import { requireRole, ADMIN, isAdmin, MAINTENANCE, GUARD } from "../middleware/auth.js";
 import { notifyUsers } from "../utils/notify.js";
 import User from "../models/User.js";
 
@@ -18,6 +18,16 @@ router.get("/", asyncHandler(async (req, res) => {
 }));
 
 router.post("/", asyncHandler(async (req, res) => {
+  const isStaff =
+    req.user?.role === "Maintenance Staff" ||
+    req.user?.role === "Security Guard" ||
+    req.user?.role === MAINTENANCE ||
+    req.user?.role === GUARD;
+
+  if (isStaff) {
+    throw httpError(403, "Maintenance team and security guards do not have authority to publish notices, polls, or suggestions.");
+  }
+
   const data = pick(req.body, ["type", "title", "body", "category", "audience", "pinned", "createdBy"]);
   // Only the society admin can publish official notices, polls, and schedule meetings. Residents can post a Suggestion.
   if (!isAdmin(req.user) && data.type !== "Suggestion") {
@@ -91,6 +101,16 @@ router.post("/:id/read", asyncHandler(async (req, res) => {
 
 // Poll vote. Allows voting on choices without discarding other votes. Tapping an option toggles that choice.
 router.post("/:id/vote", asyncHandler(async (req, res) => {
+  const isStaff =
+    req.user?.role === "Maintenance Staff" ||
+    req.user?.role === "Security Guard" ||
+    req.user?.role === MAINTENANCE ||
+    req.user?.role === GUARD;
+
+  if (isStaff) {
+    throw httpError(403, "Maintenance team and security guards do not have authority to vote in resident polls.");
+  }
+
   const reqId = String(req.params.id || "").trim();
   const query = {
     $or: [

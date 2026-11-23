@@ -9,7 +9,8 @@
     "dev": "node --watch server.js",
     "seed": "node seed.js",
     "check-db": "node scripts/check-db.js",
-    "seed-users": "node scripts/seed-users.js"
+    "seed-users": "node scripts/seed-users.js",
+    "test": "node scripts/run_automated_tests.cjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
