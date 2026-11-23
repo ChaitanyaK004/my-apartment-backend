@@ -21,6 +21,7 @@ import payments from "./routes/payments.js";
 import facilities from "./routes/facilities.js";
 import community from "./routes/community.js";
 import { requireAuth } from "./middleware/auth.js";
+import { responseCache } from "./middleware/cache.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -277,6 +278,8 @@ app.get("/download", (req, res) => {
 </body>
 </html>`);
 });
+
+app.use("/api", responseCache(3000));
 
 app.use("/api/auth", auth); // login + handoff are public, the rest checks the token itself
 // Everything below needs a logged-in user. Each router then checks the role.
