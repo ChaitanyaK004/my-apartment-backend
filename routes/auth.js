@@ -169,12 +169,20 @@ router.patch("/me", requireAuth, asyncHandler(async (req, res) => {
 // GET /api/auth/me/members - get household members
 router.get("/me/members", requireAuth, asyncHandler(async (req, res) => {
   const user = req.user;
+  const roleStr = String(user.role || "").trim().toLowerCase();
+  if (roleStr.includes("maintenance") || roleStr.includes("guard") || roleStr.includes("staff")) {
+    return res.json({ members: [] });
+  }
   res.json({ members: user.members || [] });
 }));
 
 // POST /api/auth/me/members - add household member
 router.post("/me/members", requireAuth, asyncHandler(async (req, res) => {
   const user = req.user;
+  const roleStr = String(user.role || "").trim().toLowerCase();
+  if (roleStr.includes("maintenance") || roleStr.includes("guard") || roleStr.includes("staff")) {
+    throw httpError(403, "Maintenance staff and Security guards do not have household profiles.");
+  }
   const { name, relationship, phone } = req.body;
   if (!String(name || "").trim()) throw httpError(400, "Member name is required");
 
@@ -204,6 +212,10 @@ router.post("/me/members", requireAuth, asyncHandler(async (req, res) => {
 // DELETE /api/auth/me/members/:id - remove household member
 router.delete("/me/members/:id", requireAuth, asyncHandler(async (req, res) => {
   const user = req.user;
+  const roleStr = String(user.role || "").trim().toLowerCase();
+  if (roleStr.includes("maintenance") || roleStr.includes("guard") || roleStr.includes("staff")) {
+    throw httpError(403, "Maintenance staff and Security guards do not have household profiles.");
+  }
   const targetId = String(req.params.id);
   user.members = (user.members || []).filter((m) => m.id !== targetId && m.name !== targetId);
   await user.save();
