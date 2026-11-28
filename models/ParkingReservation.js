@@ -22,6 +22,9 @@ const schema = new mongoose.Schema(
   { timestamps: true, id: false }
 );
 
+schema.index({ slot: 1, status: 1, fromTime: 1, toTime: 1 });
+schema.index({ fromTime: -1 });
+
 schema.set("toJSON", {
   transform(doc, ret) {
     delete ret._id;

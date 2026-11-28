@@ -103,20 +103,30 @@ router.post("/", asyncHandler(async (req, res) => {
   const doc = await createWithId(ParkingReservation, data, "parking", "PRK-", 3);
   logSaved("parking", doc);
 
-  // Instantly alert Admins and Security Guards so parking requests appear immediately
+  bus.emit("parking:updated", {
+    id: doc.id,
+    slot: doc.slot,
+    status: doc.status,
+    isCurrentlyOccupied: doc.status === "Active",
+    action: "created",
+  });
+
+  // Alert Admins & Security Guards in background so HTTP booking response returns immediately
   if (isResident(req.user)) {
-    const staff = await User.find({ role: { $in: [ADMIN, GUARD] }, _id: { $ne: req.user._id } }, { _id: 1 });
-    await notifyUsers(staff, {
-      type: "System",
-      title: `🚗 Parking slot booked: Slot ${doc.slot}`,
-      message: `${doc.residentName} (Flat ${doc.flat}) booked slot ${doc.slot} for ${doc.vehicleNumber || "vehicle"}.`,
-      link: "/parking",
-      refId: doc.id,
-      createdBy: req.user.name,
-    });
+    User.find({ role: { $in: [ADMIN, GUARD] }, _id: { $ne: req.user._id } }, { _id: 1 })
+      .then((staff) =>
+        notifyUsers(staff, {
+          type: "System",
+          title: `🚗 Parking slot booked: Slot ${doc.slot}`,
+          message: `${doc.residentName} (Flat ${doc.flat}) booked slot ${doc.slot} for ${doc.vehicleNumber || "vehicle"}.`,
+          link: "/parking",
+          refId: doc.id,
+          createdBy: req.user.name,
+        })
+      )
+      .catch(() => {});
   }
 
-  bus.emit("parking:updated", { id: doc.id, slot: doc.slot, status: doc.status, action: "created" });
   res.status(201).json(doc);
 }));
 
@@ -127,14 +137,26 @@ router.patch("/:id", asyncHandler(async (req, res) => {
   const doc = await ParkingReservation.findOneAndUpdate({ id: req.params.id, ...own }, { $set: pick(req.body, ["status"]) }, { new: true, runValidators: true });
   if (!doc) throw httpError(404, "Reservation not found");
   logSaved("parking (updated)", doc);
-  bus.emit("parking:updated", { id: doc.id, slot: doc.slot, status: doc.status, action: "updated" });
+  bus.emit("parking:updated", {
+    id: doc.id,
+    slot: doc.slot,
+    status: doc.status,
+    isCurrentlyOccupied: doc.status === "Active",
+    action: "updated",
+  });
   res.json(doc);
 }));
 
 router.delete("/:id", requireRole(ADMIN, GUARD), asyncHandler(async (req, res) => {
   const doc = await ParkingReservation.findOneAndDelete({ id: req.params.id });
   if (!doc) throw httpError(404, "Reservation not found");
-  bus.emit("parking:updated", { id: doc.id, slot: doc.slot, status: "Deleted", action: "deleted" });
+  bus.emit("parking:updated", {
+    id: doc.id,
+    slot: doc.slot,
+    status: "Deleted",
+    isCurrentlyOccupied: false,
+    action: "deleted",
+  });
   res.json({ deleted: req.params.id });
 }));
 
