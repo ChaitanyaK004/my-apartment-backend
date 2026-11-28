@@ -6,7 +6,7 @@ import { logSaved } from "../utils/log.js";
 import { pick, str } from "../utils/format.js";
 import { requireRole, ADMIN, GUARD, isResident, isAdmin } from "../middleware/auth.js";
 import User from "../models/User.js";
-import { notifyUsers } from "../utils/notify.js";
+import { bus, notifyUsers } from "../utils/notify.js";
 
 const router = Router();
 
@@ -116,6 +116,7 @@ router.post("/", asyncHandler(async (req, res) => {
     });
   }
 
+  bus.emit("parking:updated", { id: doc.id, slot: doc.slot, status: doc.status, action: "created" });
   res.status(201).json(doc);
 }));
 
@@ -126,12 +127,14 @@ router.patch("/:id", asyncHandler(async (req, res) => {
   const doc = await ParkingReservation.findOneAndUpdate({ id: req.params.id, ...own }, { $set: pick(req.body, ["status"]) }, { new: true, runValidators: true });
   if (!doc) throw httpError(404, "Reservation not found");
   logSaved("parking (updated)", doc);
+  bus.emit("parking:updated", { id: doc.id, slot: doc.slot, status: doc.status, action: "updated" });
   res.json(doc);
 }));
 
 router.delete("/:id", requireRole(ADMIN, GUARD), asyncHandler(async (req, res) => {
   const doc = await ParkingReservation.findOneAndDelete({ id: req.params.id });
   if (!doc) throw httpError(404, "Reservation not found");
+  bus.emit("parking:updated", { id: doc.id, slot: doc.slot, status: "Deleted", action: "deleted" });
   res.json({ deleted: req.params.id });
 }));
 

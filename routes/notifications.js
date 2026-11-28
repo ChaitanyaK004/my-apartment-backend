@@ -43,15 +43,18 @@ router.get("/stream", (req, res) => {
   const send = (item) => res.write(`event: notification\ndata: ${JSON.stringify(item)}\n\n`);
   const sendEmergency = (data) => res.write(`event: emergency\ndata: ${JSON.stringify(data)}\n\n`);
   const sendResolved = (data) => res.write(`event: emergency_resolved\ndata: ${JSON.stringify(data)}\n\n`);
+  const sendParking = (data) => res.write(`event: parking_updated\ndata: ${JSON.stringify(data)}\n\n`);
   const ping = setInterval(() => res.write(`: ping\n\n`), 25_000);
   bus.on(channel, send);
   bus.on("emergency:broadcast", sendEmergency);
   bus.on("emergency:resolved", sendResolved);
+  bus.on("parking:updated", sendParking);
   req.on("close", () => {
     clearInterval(ping);
     bus.off(channel, send);
     bus.off("emergency:broadcast", sendEmergency);
     bus.off("emergency:resolved", sendResolved);
+    bus.off("parking:updated", sendParking);
   });
 });
 
