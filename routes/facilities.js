@@ -44,6 +44,25 @@ function checkSlotOverlap(slotA, slotB) {
   return rangeA.start < rangeB.end && rangeB.start < rangeA.end;
 }
 
+function isPastReservation(dateStr, slotStr) {
+  if (!dateStr) return false;
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const m = String(dateStr).match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return false;
+  const bDateStr = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  if (bDateStr < todayStr) return true;
+  if (bDateStr > todayStr) return false;
+
+  // Same day: check slot end time
+  const range = parseSlotRange(slotStr);
+  if (range && range.end !== null) {
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    if (currentMins >= range.end) return true;
+  }
+  return false;
+}
+
 router.get("/bookings", asyncHandler(async (req, res) => {
   const filter = {};
   for (const k of ["facilityId", "status", "date"]) if (req.query[k]) filter[k] = str(req.query[k]);
@@ -184,6 +203,9 @@ router.patch("/bookings/:id", requireRole(ADMIN, "admin", "Secretary", "secretar
     ],
   });
   if (!doc) throw httpError(404, "Booking not found");
+  if (req.body.status === "Confirmed" && isPastReservation(doc.date, doc.slot)) {
+    throw httpError(400, "Cannot approve a past booking. You may only decline/reject expired booking requests.");
+  }
   if (req.body.status) doc.status = req.body.status;
   if (req.body.status === "Confirmed") doc.approvedBy = req.user.name;
   if (req.body.status === "Rejected") {
@@ -196,10 +218,19 @@ router.patch("/bookings/:id", requireRole(ADMIN, "admin", "Secretary", "secretar
 }));
 
 router.patch("/bookings/:id/cancel", asyncHandler(async (req, res) => {
-  const doc = await FacilityBooking.findOne({ id: req.params.id });
+  const doc = await FacilityBooking.findOne({
+    $or: [
+      { id: req.params.id },
+      { id: req.params.id.trim() },
+      ...(mongoose.isValidObjectId(req.params.id) ? [{ _id: req.params.id }] : []),
+    ],
+  });
   if (!doc) throw httpError(404, "Booking not found");
   if (isResident(req.user) && doc.flat !== req.user.flat) {
     throw httpError(403, "You can only cancel your own bookings");
+  }
+  if (isPastReservation(doc.date, doc.slot)) {
+    throw httpError(400, "Past events and bookings cannot be cancelled. Only future reservations can be cancelled.");
   }
   doc.status = "Cancelled";
   await doc.save();

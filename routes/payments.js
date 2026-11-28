@@ -71,10 +71,12 @@ router.post("/", requireRole(ADMIN, RESIDENT), asyncHandler(async (req, res) => 
 }));
 
 router.post("/:id/pay", asyncHandler(async (req, res) => {
+  if (!isResident(req.user)) {
+    throw httpError(403, "Only residents can pay maintenance bills. Society Admin can approve or reject submitted payments.");
+  }
   const doc = await Payment.findOne({ id: req.params.id });
   if (!doc) throw httpError(404, "Payment record not found");
   if (
-    isResident(req.user) &&
     String(doc.flat || "").trim().toUpperCase() !== String(req.user.flat || "").trim().toUpperCase()
   ) {
     throw httpError(403, "You can only pay dues for your own flat");

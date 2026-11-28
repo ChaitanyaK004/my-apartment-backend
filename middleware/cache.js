@@ -7,8 +7,14 @@ const memoryStore = new Map();
  */
 export function responseCache(ttlMs = 3000) {
   return (req, res, next) => {
-    // Never cache non-GET methods, auth routes, or Server-Sent Events streams
-    if (req.method !== "GET" || req.path.includes("/stream") || req.path.includes("/login")) {
+    // Never cache non-GET methods, auth routes, notifications, emergency, or Server-Sent Events streams
+    if (
+      req.method !== "GET" ||
+      req.path.includes("/stream") ||
+      req.path.includes("/login") ||
+      req.path.includes("/emergency") ||
+      req.path.includes("/notifications")
+    ) {
       if (req.method !== "GET") {
         const prefix = req.baseUrl || req.path.split("/").slice(0, 3).join("/");
         for (const k of memoryStore.keys()) {

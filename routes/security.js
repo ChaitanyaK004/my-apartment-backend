@@ -5,7 +5,7 @@ import Visitor from "../models/Visitor.js";
 import User from "../models/User.js";
 import { createWithId } from "../utils/nextId.js";
 import { asyncHandler, httpError } from "../middleware/errors.js";
-import { requireRole, ADMIN, GUARD, RESIDENT, isResident } from "../middleware/auth.js";
+import { requireRole, ADMIN, GUARD, RESIDENT, MAINTENANCE, isResident } from "../middleware/auth.js";
 import { logSaved } from "../utils/log.js";
 import { pick, str } from "../utils/format.js";
 import { createLogin, wantsLogin } from "../utils/accounts.js";
@@ -70,12 +70,22 @@ router.delete("/staff/:id", requireRole(ADMIN), asyncHandler(async (req, res) =>
 
 /* ------------------------------ Incidents ------------------------------- */
 
-router.get("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(async (req, res) => {
+router.get("/incidents", requireRole(ADMIN, GUARD, RESIDENT, MAINTENANCE, "Maintenance Staff"), asyncHandler(async (req, res) => {
   const filter = {};
   for (const k of ["status", "severity", "type"]) if (req.query[k]) filter[k] = str(req.query[k]);
   const and = [];
-  // Residents only see incidents they reported (or that were reported for their flat)
-  if (isResident(req.user)) and.push({ $or: [{ reporterUsername: req.user.username }, ...(req.user.flat ? [{ flat: req.user.flat }] : [])] });
+  // Residents only see incidents they reported (or for their flat), PLUS all emergency / high-severity society alerts
+  if (isResident(req.user)) {
+    and.push({
+      $or: [
+        { reporterUsername: req.user.username },
+        ...(req.user.flat ? [{ flat: req.user.flat }] : []),
+        { type: "Emergency" },
+        { severity: "High" },
+        { title: { $regex: /emergency|sos|fire/i } },
+      ],
+    });
+  }
   if (req.query.q) {
     const q = regex(req.query.q);
     and.push({ $or: [{ title: q }, { description: q }, { location: q }, { id: q }] });
@@ -84,7 +94,7 @@ router.get("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(async
   res.json(await Incident.find(filter).sort({ occurredAt: -1 }));
 }));
 
-router.post("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(async (req, res) => {
+router.post("/incidents", requireRole(ADMIN, GUARD, RESIDENT, MAINTENANCE, "Maintenance Staff"), asyncHandler(async (req, res) => {
   const data = pick(req.body, INCIDENT_FIELDS);
   data.reportedBy = req.user.name;
   data.reporterUsername = req.user.username;
@@ -94,15 +104,23 @@ router.post("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(asyn
   const doc = await createWithId(Incident, data, "incident", "INC-", 3);
   logSaved("incidents", doc);
 
-  if (doc.type === "Emergency") {
-    // Society-wide emergency broadcast to EVERY user in the society
+  const isUrgent =
+    doc.type === "Emergency" ||
+    doc.severity === "High" ||
+    /emergency|sos|fire/i.test(doc.title || "") ||
+    /emergency|sos|fire/i.test(doc.type || "") ||
+    /emergency|sos|fire/i.test(doc.description || "");
+
+  if (isUrgent) {
+    // Society-wide emergency broadcast to EVERY user in the society (Admin, Guard, Resident, Maintenance)
     const allUsers = await User.find({}, { _id: 1, role: 1, name: 1, flat: 1 });
+    console.log(`🚨 Incident emergency broadcast by ${req.user.role} (${req.user.name}) -> Dispatching to ${allUsers.length} user(s) across roles: [${[...new Set(allUsers.map((u) => u.role))].join(", ")}]`);
     await notifyUsers(allUsers, {
       type: "Emergency",
       isEmergency: true,
-      location: doc.location,
+      location: doc.location || "Society Premises",
       title: `🚨 EMERGENCY ALERT: ${doc.title.toUpperCase()}`,
-      message: `${doc.description || "Emergency alert reported"} Location: ${doc.location}. Respond immediately.`,
+      message: `${doc.description || "Emergency alert reported"} Location: ${doc.location || "Society Premises"}. Respond immediately.`,
       link: "/security",
       refId: doc.id,
       createdBy: req.user.name,
@@ -112,8 +130,8 @@ router.post("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(asyn
       incidentId: doc.id,
       emergencyType: doc.title,
       title: `🚨 EMERGENCY ALERT: ${doc.title.toUpperCase()}`,
-      message: `${doc.description || "Emergency alert reported"} Location: ${doc.location}.`,
-      location: doc.location,
+      message: `${doc.description || "Emergency alert reported"} Location: ${doc.location || "Society Premises"}.`,
+      location: doc.location || "Society Premises",
       reportedBy: req.user.name,
       flat: doc.flat,
       severity: "High",
@@ -121,8 +139,8 @@ router.post("/incidents", requireRole(ADMIN, GUARD, RESIDENT), asyncHandler(asyn
       timestamp: new Date().toISOString(),
     });
   } else {
-    // Admin + all guards hear about it (except the person who reported it)
-    const staff = await User.find({ role: { $in: [ADMIN, GUARD] }, _id: { $ne: req.user._id } }, { _id: 1 });
+    // Admin + guards + maintenance staff hear about it (except the person who reported it)
+    const staff = await User.find({ role: { $in: [ADMIN, GUARD, MAINTENANCE, "Maintenance Staff"] }, _id: { $ne: req.user._id } }, { _id: 1 });
     await notifyUsers(staff, {
       type: "Security",
       title: `${doc.severity === "High" ? "🚨 " : ""}Incident reported: ${doc.title}`,
@@ -168,8 +186,8 @@ router.delete("/incidents/:id", requireRole(ADMIN), asyncHandler(async (req, res
 /* -------------------------- Emergency + summary ------------------------- */
 
 // The SOS / Emergency alert: logs a High incident and instantly alerts EVERY user in the society + triggers emergency siren broadcast
-// Restricted: ONLY ADMINS have permission to broadcast emergency SOS
-router.post("/emergency", requireRole(ADMIN), asyncHandler(async (req, res) => {
+// Authority: Admins and Security Guards (and residents) have permission to broadcast emergency SOS
+router.post("/emergency", requireRole(ADMIN, GUARD, RESIDENT, "admin", "Security Guard", "Resident", "guard", "secretary"), asyncHandler(async (req, res) => {
   const location = String(req.body.location || "").trim() || (req.user.flat ? `Flat ${req.user.flat}` : "Society Premises");
   const emergencyType = String(req.body.emergencyType || "Emergency Alert").trim();
   const description = String(req.body.message || "").trim() || `Emergency alert raised by ${req.user.name}${req.user.flat ? ` (Flat ${req.user.flat})` : ""}.`;
@@ -190,6 +208,7 @@ router.post("/emergency", requireRole(ADMIN), asyncHandler(async (req, res) => {
 
   // 1. Notify EVERY SINGLE USER in the entire society (Admins, Guards, Residents, Maintenance)
   const allUsers = await User.find({}, { _id: 1, role: 1, name: 1, flat: 1 });
+  console.log(`🚨 Emergency SOS broadcast by ${req.user.role} (${req.user.name}) -> Dispatching to ${allUsers.length} user(s) across roles: [${[...new Set(allUsers.map((u) => u.role))].join(", ")}]`);
   await notifyUsers(allUsers, {
     type: "Emergency",
     isEmergency: true,
@@ -219,15 +238,16 @@ router.post("/emergency", requireRole(ADMIN), asyncHandler(async (req, res) => {
   res.status(201).json({ ...doc.toJSON(), broadcastedTo: allUsers.length });
 }));
 
-// Check if there is an active emergency (unresolved within last 2 hours)
+// Check if there is an active emergency (unresolved)
 router.get("/emergency/active", asyncHandler(async (req, res) => {
-  const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
   const active = await Incident.findOne({
-    type: "Emergency",
-    severity: "High",
     status: { $ne: "Resolved" },
-    createdAt: { $gte: cutoff },
-  }).sort({ createdAt: -1 });
+    $or: [
+      { type: "Emergency" },
+      { severity: "High" },
+      { title: { $regex: /emergency|sos|fire/i } },
+    ],
+  }).sort({ occurredAt: -1, createdAt: -1 });
 
   res.json({ active: active || null });
 }));
